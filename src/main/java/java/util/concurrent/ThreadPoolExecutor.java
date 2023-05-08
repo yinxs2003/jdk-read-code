@@ -1361,18 +1361,26 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * 3. If we cannot queue task, then we try to add a new
          * thread.  If it fails, we know we are shut down or saturated
          * and so reject the task.
+         *
+         * 1. 如果当前线程数小于核心线程数，会调用addWorker添加一个线程最为核心线程
+         * 2. 如果新任务可以成功被加入队列，然后仍然需双重检测我们是否应该添加一个线程
+         * （因为从上次检查时候已存在线程可能已经死亡）当该方法被调用时候，线程池已经处于shutdown状态
+         * （执行但不添加新任务）。所以我们需要重新检测状态，看是否需要拒绝新提交的任务，
+         * 或者当没有核心线程时候添加一个新的核心线程
+         * 3. 如果无法对任务进行排队，我们需要增加一个新的线程。如果失败，我们认为线程池是处于shutdown
+         * 或者是饱和状态，并拒绝新提交的任务
          */
         int c = ctl.get();
-        if (workerCountOf(c) < corePoolSize) {
+        if (workerCountOf(c) < corePoolSize) { // 当前线程数大于0但小于核心线程数,添加新的worker
             if (addWorker(command, true))
                 return;
             c = ctl.get();
         }
-        if (isRunning(c) && workQueue.offer(command)) {
+        if (isRunning(c) && workQueue.offer(command)) { // 状态是RUNNING并成功加入队列
             int recheck = ctl.get();
-            if (! isRunning(recheck) && remove(command))
+            if (! isRunning(recheck) && remove(command)) // 双重检测失败，则拒绝新任务
                 reject(command);
-            else if (workerCountOf(recheck) == 0)
+            else if (workerCountOf(recheck) == 0) // 当核心线程数为0，增加新的核心线程
                 addWorker(null, false);
         }
         else if (!addWorker(command, false))
