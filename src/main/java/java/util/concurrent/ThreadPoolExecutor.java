@@ -383,10 +383,15 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
     private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
 
     // runState is stored in the high-order bits
+    // 代表RUNNING，可以处理，可以接收
     private static final int RUNNING    = -1 << COUNT_BITS;
+    // 代表SHUTDOWN，可以处理，但不接收
     private static final int SHUTDOWN   =  0 << COUNT_BITS;
+    // 代表STOP,中断处理中的任务，不会接收，丢弃队列中任务
     private static final int STOP       =  1 << COUNT_BITS;
+    // 过渡状态，表示线程池即将关闭
     private static final int TIDYING    =  2 << COUNT_BITS;
+    // 代表线程池关闭状态
     private static final int TERMINATED =  3 << COUNT_BITS;
 
     // Packing and unpacking ctl
@@ -899,12 +904,14 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * @return true if successful
      */
     private boolean addWorker(Runnable firstTask, boolean core) {
+        // 下面代码修改runState
         retry:
         for (;;) {
             int c = ctl.get();
-            int rs = runStateOf(c);
+            int rs = runStateOf(c); // runState，运行状态
 
             // Check if queue empty only if necessary.
+            // 没有任务，直接return false
             if (rs >= SHUTDOWN &&
                 ! (rs == SHUTDOWN &&
                    firstTask == null &&
@@ -913,18 +920,22 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
 
             for (;;) {
                 int wc = workerCountOf(c);
+                // 如果wc大于CAPACITY或者是某个值，直接返回false
                 if (wc >= CAPACITY ||
                     wc >= (core ? corePoolSize : maximumPoolSize))
                     return false;
+                // cas成功，跳出双重循环继续往下执行
                 if (compareAndIncrementWorkerCount(c))
                     break retry;
                 c = ctl.get();  // Re-read ctl
-                if (runStateOf(c) != rs)
+                if (runStateOf(c) != rs) // cas执行失败，但ctl状态没有改变，此时应该是存在线程冲突，执行continue retry，重新cas
                     continue retry;
                 // else CAS failed due to workerCount change; retry inner loop
+                // cas执行失败，但ctl状态已经改变，说明冲突任务已完成提交，重新执行内层cas进行比较
             }
         }
 
+        // 实际新增worker操作
         boolean workerStarted = false;
         boolean workerAdded = false;
         Worker w = null;
@@ -940,6 +951,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
                     // shut down before lock acquired.
                     int rs = runStateOf(ctl.get());
 
+                    // 如果线程池处于RUNNING或者SHUTDOWN且没有任务
                     if (rs < SHUTDOWN ||
                         (rs == SHUTDOWN && firstTask == null)) {
                         if (t.isAlive()) // precheck that t is startable
@@ -1371,19 +1383,30 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * 或者是饱和状态，并拒绝新提交的任务
          */
         int c = ctl.get();
-        if (workerCountOf(c) < corePoolSize) { // 当前线程数大于0但小于核心线程数,添加新的worker
+        // 当前线程数大于0但小于核心线程数,添加新的worker
+        if (workerCountOf(c) < corePoolSize) {
             if (addWorker(command, true))
                 return;
             c = ctl.get();
         }
-        if (isRunning(c) && workQueue.offer(command)) { // 状态是RUNNING并成功加入队列
+        // 状态是RUNNING并成功加入队列
+        if (isRunning(c) && workQueue.offer(command)) {
             int recheck = ctl.get();
-            if (! isRunning(recheck) && remove(command)) // 双重检测失败，则拒绝新任务
+
+            // 重新检测是否为RUNNING，不为RUNNING则拒绝新任务
+            if (! isRunning(recheck) && remove(command))
                 reject(command);
-            else if (workerCountOf(recheck) == 0) // 当核心线程数为0，增加新的核心线程
+            else if (workerCountOf(recheck) == 0)
+                /**
+                 *  执行到这里说明，阻塞队列有新加入的任务，但工作线程数为0
+                 *  如果为0需要添加一个非核心工作线程去处理阻塞队列中的任务
+                 *  发生这种情况有两种原因：
+                 *  1. 线程池刚刚创建，核心线程数为0个
+                 *  2. 即使有核心线程，可以设置核心线程数超时，导致核心线程数为0（allowCoreThreadTimeout）
+                 */
                 addWorker(null, false);
         }
-        else if (!addWorker(command, false))
+        else if (!addWorker(command, false)) //状态不是RUNNING，拒绝任务
             reject(command);
     }
 
