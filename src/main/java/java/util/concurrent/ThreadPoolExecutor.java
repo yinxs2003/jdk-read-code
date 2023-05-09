@@ -888,7 +888,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * creation fails, either due to the thread factory returning
      * null, or due to an exception (typically OutOfMemoryError in
      * Thread.start()), we roll back cleanly.
-     *
+     * <p>firstTask用它来初始化时传入的第一个任务，这个任务可以有也可以为null。如果这个值是非空的，那么线程就会在启动初期立即执行这个任务；如果这个值是null，那么就需要创建一个线程去执行任务列表（workQueue）中的任务，也就是非核心线程的创建。</p>
      * @param firstTask the task the new thread should run first (or
      * null if none). Workers are created with an initial first task
      * (in method execute()) to bypass queuing when there are fewer
@@ -1383,7 +1383,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * 或者是饱和状态，并拒绝新提交的任务
          */
         int c = ctl.get();
-        // 当前线程数大于0但小于核心线程数,添加新的worker
+        // 如果当前线程数小于核心线程数,添加新的worker
         if (workerCountOf(c) < corePoolSize) {
             if (addWorker(command, true))
                 return;
